@@ -1,7 +1,8 @@
 const URL = "https://www.livingsharp.com/items/198/poop-mug";
 // const URL = "http://192.168.99.101:32771/sitemap.html";
 // const URL = "https://www.livingsharp.com/sitemap.html";
-//
+
+
 // require('./extract_amp_urls.js')
 // .extractAMPurls(
 // 	URL,

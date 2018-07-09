@@ -3,9 +3,10 @@
 */
 
 // -------------------------------- MODULE REQUIRE -------------------------------------
-const requests			= require('request-promise'); 	// Fetch AMP page HTML
-const ampvalidator 	= require('amphtml-validator'); // AMP validator
-const LineByLineReader = require('line-by-line');
+const requests					= require('request-promise'); 	// Fetch AMP page HTML
+const ampvalidator 			= require('amphtml-validator'); // AMP validator
+const fs 								= require('fs');							// Filestream for output data
+const LineByLineReader 	= require('line-by-line');
 // ----------------------- PROVIDES TIMESTAMPING FOR FILES ---------------------------
 let today  	= new Date();
 let dd = today.getDate();
@@ -46,12 +47,27 @@ module.exports = {
 				console.log("Finished Reading");
 			});
 
-			lr.on('line',(line)=>{
+			lr.on('line',async (line)=>{
 				let amp_url = line.split(' ')[1];
-				if(amp_url.length === 0) return;
-				getHtmlFromUrl(amp_url).then(
-					()
-				)
+				if(amp_url.length > 0){
+					await getHtmlFromUrl(amp_url).then(
+						async (resolved)=>{
+							await validateAmpPage(resolved.result)
+							.then((resolved,rejected)=>{
+								console.log("CHECKING: " + amp_url);
+								console.log(resolved);
+							})
+							.catch((error)=>{
+								console.log("CHECKING: " + amp_url);
+								conosle.log("ERROR: " + error.message);
+							});
+						},
+						(rejected)=>{
+							// Check reject
+						}
+					);
+				}
+
 			});
 
 		});
@@ -78,6 +94,34 @@ async function getHtmlFromUrl(url){
 		})
 		.catch(error 	=> {
 			reject( { "success" : false , "result" : error.message } );
+		});
+	});
+}
+
+
+
+async function validateAmpPage(html){
+	return new Promise((resolve, reject) => {
+		amphtmlValidator.getInstance().then(function (validator) {
+		  let result = validator.validateString(html);
+			let msg = '';
+
+			if (result.status === 'PASS'){
+				msg = "PASS:\n" + result.status
+			}else{
+				msg = "FAIL:\n" + result.status;
+			}
+
+		  for (var i = 0; i < result.errors.length; i++) {
+		    let error = result.errors[i];
+		    let log = 'line ' + error.line + ', col ' + error.col + ': ' + error.message;
+		    if (error.specUrl !== null) {
+					log += ' (see ' + error.specUrl + ')';
+		    }
+				msg += log;
+	    }
+
+			resolve(msg);
 		});
 	});
 }
