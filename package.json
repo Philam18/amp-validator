@@ -1,0 +1,21 @@
+{
+  "name": "phil-testing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "jasmine-node ./spec/test-spec.js --verbose"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "amphtml-validator": "^1.0.23",
+    "dotenv": "^6.0.0",
+    "jasmine-node": "^1.15.0",
+    "line-by-line": "^0.1.6",
+    "npm": "^6.1.0",
+    "request": "^2.87.0",
+    "request-promise": "^4.2.2",
+    "xml2js": "^0.4.19"
+  }
+}
