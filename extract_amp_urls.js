@@ -7,13 +7,19 @@
 		before the href attribute, like so:
 
 											<link rel="amphtml" href="...">
-	The File is written in the format of Space Separated values, each page represented by one line.
-	The first element represents the canonical URL, and the next URL represents the AMP url.
+
+	The File is written in the format of Space Separated values, each url-pair represented by one line.
+	The first element/index represents the canonical URL, and the second URL represents the AMP url.
+
+
+
 
 */
 // -------------------------------- MODULE REQUIRE -------------------------------------
-const request = require('request-promise'); // Request-promise returns a promise
-const fs 			= require('fs');							// Filestream for output data
+const request = require('request-promise'); 			// Request-promise returns a promise
+var parseString = require('xml2js').parseString;	// Parses XML to a JS object
+const fs 			= require('fs');										// Filestream for output data
+
 // ----------------------- PROVIDES TIMESTAMPING FOR FILES ---------------------------
 let today  	= new Date();
 let dd = today.getDate();
@@ -27,14 +33,17 @@ if(mm<10) mm = '0' + mm;
 if(hr<10) hr = '0' + hr;
 if(min<10) min = '0' + min;
 if(sec<10) sec = '0' + sec;
-let timestamp = '_' + mm + "-" + dd + "-" + yy + "_" + hr + "-" + min + "-" + sec;
-let timestamp_iso = "_" + yy + mm + dd + "T" + hr + min + sec;
+let timestamp = mm + "-" + dd + "-" + yy + "_" + hr + "-" + min + "-" + sec;
+let timestamp_iso = yy + mm + dd + "T" + hr + min + sec;
 // -------------------------------- REGEX DECLARATIONS ------------------------------------
-const REGEX_DOMAIN 			= /(http(s)?:\/\/)?[^\/]+/;	// Matches only the TLD of the url
-const REGEX_HREF 				= /<a\s+href="([^"]+)">/gi; //Matches anything with <a href="...">
-const REGEX_HREF_AMP 		= /<link\s+rel="amphtml"\s+href="([^"]+)">/gi;	// Matches anything with <link rel="amphtml" href="...">
+const REGEX_DOMAIN 				= /(http(s)?:\/\/)?[^\/]+/;	// Matches only the TLD of the url
+const REGEX_HREF 					= /(<a\s+href=")([^"]+)"/gi; //Matches anything with <a href="...">
+const REGEX_HREF_AMP 			= /<link\s+rel="amphtml"\s+href="([^"]+)(")/gi;	// Matches anything with <link rel="amphtml" href="...">
+const REGEX_PATH_OR_LINK 	= /(^\/.+$)/i; // Determines if an href link has the domain included
+const REGEX_XML_FILE			= /^.+(\.xml)$/i; // Determines if a provided sitemap is URL or XML
 // ---------------------------------------------------------------------
 module.exports = {
+
 	/*
 		extractAMPurls( url , callback , optional )
 			visits a webpage, and extracts all possible AMP urls from the HTML, and prints it into a file
@@ -42,61 +51,107 @@ module.exports = {
 			string url 					- the url to the webpage
 			Function callback 	- the callback function to invoke after running
 			Object options (optional parameters)
-				boolean safe 			- whether there should be a timeout after every request to reduce being blocked, true by default
-				int timeout 			- what the timeout should be for requests (safe must be TRUE for this to work), 1 seconds default
+				boolean safe_mode - whether there should be a wait_time after every request to reduce being blocked, true by default
+				int 		wait_time - what the wait_time should be for requests (safe must be TRUE for this to work), 1 seconds default
 		returns:
 			The filename that was written to after the parsing is complete.
 	*/
-	extractAMPurls : async function(url, callback, options){
-		let SAFE_MODE = true;
-		let TIME_OUT 	= 1000;
-		if(arguments.length == 2){
-			SAFE_MODE = options.safe || true;
-			TIME_OUT 	= options.timeout || 2;
-			if(!SAFE_MODE) TIME_OUT = 0;
-		}
+	extractAMPurls : async function(
+		sitemap_url,
+		callback,
+		options = { 'safe_mode' : false , 'wait_time' : 0 }
+	){
 
-		let response = await getHtmlFromUrl(url);
-		if(!response.success) return console.log("Could not retrieve HTML from " + url , response.result);
-		console.log("Successfully retrieved HTML from " + url);
-		let filename = 'SITEMAP_URL' + timestamp_iso + ".txt";
+
+		let SAFE_MODE = options.safe_mode;
+		let WAIT_TIME = options.wait_time;
+		console.log('---------------------- Configuration ----------------------');
+		console.log(`Safe Mode enabled:           ${SAFE_MODE}`);
+		console.log(`Wait time between requests:  ${WAIT_TIME}`);
+		console.log('-----------------------------------------------------------');
+
+		console.log("Starting crawl...");
+		let response = await getHtmlFromUrl(sitemap_url);
+		if(!response.success) return console.log(`Could not retrieve HTML from ${sitemap_url}\n${response.result}`);
+		let domain 	= REGEX_DOMAIN.exec(sitemap_url)[0];
+		let sitemap_body 		= response.result;
+		let number_of_items = 0;
+		console.log(`Successfully retrieved HTML from ${sitemap_url}`);
+
+		let filename = `SITEMAP_URL_${timestamp_iso}.txt`;
 		let logger 	= fs.createWriteStream( filename );
 
-		// Represents the result set of the entire site
-		let html 		= response.result;
-		let domain 	= REGEX_DOMAIN.exec(url)[0];
-
-		// Open a filestream to begin writing
+		// Wait until the filestream is open before writing
 		logger.on('open', async ()=>{
-			// Write the first url pair
-			let base_url = url;
-			let base_amp_url = getAmpHrefFromHtml(html).join(' ');
-			console.log("Success: " + base_url + ' -> ' + base_amp_url);
-			logger.write( base_url + " " + base_amp_url + "\n" );
-			// From the current URL, fetch all
-			let links = getHrefFromHtml(html);
-			iterateLinks(links);
+			// From the (presumed) sitemap URL, fetch all HREFs
+			console.log('Starting crawl of sub-pages...');
+
+			// Determine if the website is in X
+			let hrefs = [];
+			if(REGEX_XML_FILE.test(sitemap_url)){
+				parseString(sitemap_body, (error, result)=>{
+					if(error) return console.log("Error parsing XML: " + error.message);
+					let url_set = result.urlset.url;
+					for(let url of url_set){
+						hrefs.push( url.loc[0] );
+					}
+					return;
+				});
+			}else{
+				hrefs = getHrefFromHtml(sitemap_body);
+			}
+
+
+			number_of_items = hrefs.length;
+			iterateLinks( hrefs );
+
 			async function iterateLinks(links){
-				let old_links = links;
-				let link = old_links.pop();
-				let new_url = domain + link;
-				await getHtmlFromUrl(new_url).then(
+				let old_links 		= links; // Keep an updated reference to the link-array, for when we recurse
+				let href 					= old_links.pop();
+				let count 				= number_of_items - old_links.length;
+				let canonical_url = href;
+				if( REGEX_PATH_OR_LINK.test(href) ) canonical_url = domain + canonical_url;
+
+				// Make an HTTP request to the sub-webpage
+				console.log(`--------------------------( ${count} / ${number_of_items} )--------------------------`);
+				let html = await getHtmlFromUrl(canonical_url).then(
 					(resolved)=>{
-						let amp_url = getAmpHrefFromHtml(resolved.result).join(' ');
-						console.log("Success: " + new_url + ' -> ' + amp_url);
-						logger.write( new_url + " " + amp_url  + "\n" );
+						console.log(`[SUCCESS] HTTP GET`);
+						console.log(`Canonical: ${canonical_url}`);
+						return resolved.result;
 					},
 					(rejected)=>{
-						console.log("Failure: " + new_url + ' -> ' + rejected.message);
+						console.log(`[FAILURE] HTTP GET`);
+						console.log(`Canonical: ${canonical_url}`);
+						console.log(`Error:     ${rejected.result}`);
+						return null;
 					}
 				);
+
+				// ONLY if the HTML returned successfully, grab the AMP url from the HTML (if any)
+				if(html){
+					let amp_url = getAmpHrefFromHtml(html).join(' ');
+					console.log(`AMP      : ${(amp_url.length > 0) ? amp_url : 'None'}`)
+					// Write the canonical/amp pair into the file
+					logger.write(`${canonical_url} ${amp_url}\n`);
+				}
+
+				// WAIT A BIT BEFORE MAKING ANOTHEr REQUEST
 				if(links.length > 0){
-					setTimeout( ()=>{ iterateLinks(old_links) } , TIME_OUT );
+					setTimeout( ()=>{ iterateLinks(old_links) } , WAIT_TIME );
+
+				// FINISHED, RETURN FILENAME
 				}else{
+					console.log(`--------------------------------------------------------------`);
+					console.log("Done");
+					console.log(`Written to file '${filename}'`);
 					callback(filename);
 				}
 			}
+
 		});
+
+
 	}
 }
 
